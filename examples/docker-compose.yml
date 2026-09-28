@@ -36,6 +36,12 @@ services:
       # ASK_API_KEY: ...
       # ASK_BASE_URL: https://api.z.ai/api/anthropic
       # ASK_MODEL: glm-5.3-flash
+      # or OpenCode Go (OpenAI format):
+      # ASK_API_FORMAT: openai
+      # ASK_BASE_URL: https://opencode.ai/zen/go/v1
+      # ASK_SESSION_HEADER: x-opencode-session
+      # ASK_MODEL: glm-5.3-flash
+      # ASK_GUEST_ENABLED: "true"            # let visitors who are not logged in ask
       # EXA_API_KEY: ...
 
   caddy:
