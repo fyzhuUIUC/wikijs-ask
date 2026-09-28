@@ -31,9 +31,17 @@ export async function whoami(jwt) {
   return { ...profile, admin };
 }
 
+// pages.list checks access by path only (Wiki.js 2.5), so pages opened up by a tag rule, which
+// is how Guests usually get read access, never appear in it. pages.search passes the tags along;
+// with an empty query the basic search engine returns every page, up to its "max hits" setting.
 export async function listPages(jwt) {
-  const d = await gql(jwt, '{pages{list(limit:5000,orderBy:PATH){id locale path title description updatedAt}}}');
-  return d.pages.list;
+  const [list, found] = await Promise.all([
+    gql(jwt, '{pages{list(limit:5000,orderBy:PATH){id locale path title description updatedAt}}}').then(d => d.pages.list),
+    gql(jwt, '{pages{search(query:""){results{id locale path title description}}}}').then(d => d.pages.search.results).catch(() => []),
+  ]);
+  const seen = new Set(list.map(p => `${p.locale}/${p.path}`));
+  const extra = found.filter(p => !seen.has(`${p.locale}/${p.path}`)).map(p => ({ ...p, updatedAt: null }));
+  return [...list, ...extra].sort((a, b) => `${a.locale}/${a.path}`.localeCompare(`${b.locale}/${b.path}`));
 }
 
 // Page text cache keyed by locale/path@updatedAt. Content does not depend on
@@ -41,8 +49,9 @@ export async function listPages(jwt) {
 // user's own listPages() result.
 const textCache = new Map();
 
+// Pages found only through search have no updatedAt; their text is refetched every 5 minutes.
 async function pageText(jwt, p) {
-  const key = `${p.locale}/${p.path}@${p.updatedAt}`;
+  const key = `${p.locale}/${p.path}@${p.updatedAt ?? `t${Math.floor(Date.now() / 300_000)}`}`;
   if (!textCache.has(key)) {
     for (const k of textCache.keys()) if (k.startsWith(`${p.locale}/${p.path}@`)) textCache.delete(k);
     textCache.set(key, (await readPage(jwt, p.locale, p.path)).text);
