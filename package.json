@@ -1,0 +1,15 @@
+{
+  "name": "wikijs-ask",
+  "version": "0.1.0",
+  "description": "An AI Q&A panel for Wiki.js: answers from the pages each user can read, with sources, saved chats and Markdown export",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "main": "src/server.mjs",
+  "scripts": { "start": "node src/server.mjs", "check": "for f in src/*.mjs public/*.js; do node --check $f || exit 1; done" },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "pg": "^8.13.0"
+  }
+}

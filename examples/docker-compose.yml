@@ -1,0 +1,49 @@
+# Wiki.js + wikijs-ask + Caddy. Put wikijs-ask's source next to this file as ./wikijs-ask
+# (or replace "build" with a published image).
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wiki
+      POSTGRES_USER: wiki
+      POSTGRES_PASSWORD: change-me
+    volumes: [pg:/var/lib/postgresql/data]
+
+  wiki:
+    image: ghcr.io/requarks/wiki:2
+    restart: unless-stopped
+    depends_on: [db]
+    environment:
+      DB_TYPE: postgres
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: wiki
+      DB_PASS: change-me
+      DB_NAME: wiki
+
+  ask:
+    build: ./wikijs-ask
+    restart: unless-stopped
+    depends_on: [db, wiki]
+    environment:
+      ASK_ORIGIN: https://wiki.example.org        # the wiki's public origin, exactly
+      WIKI_INTERNAL_URL: http://wiki:3000
+      # a separate database in the same Postgres; create it once:
+      #   docker compose exec db createdb -U wiki ask
+      DATABASE_URL: postgres://wiki:change-me@db:5432/ask
+      # model settings can also be set later on /_ask/settings
+      # ASK_API_KEY: ...
+      # ASK_BASE_URL: https://api.z.ai/api/anthropic
+      # ASK_MODEL: glm-5.3-flash
+      # EXA_API_KEY: ...
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+
+volumes: { pg: {}, caddy: {} }

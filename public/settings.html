@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wikijs-ask settings</title>
+<style>
+  :root { --p: var(--wa-primary, #1f2d3d); --a: var(--wa-accent, #f29111); --l: var(--wa-link, #b3470c); }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f5f7; color: #222; font: 14px/1.5 Roboto, -apple-system, "Segoe UI", "Noto Sans SC", "PingFang SC", sans-serif; }
+  header { background: var(--p); color: #fff; padding: 14px 24px; border-bottom: 4px solid var(--a); display: flex; justify-content: space-between; align-items: center; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header a { color: #fff; opacity: .85; }
+  main { max-width: 860px; margin: 0 auto; padding: 20px 16px 80px; }
+  .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 18px; }
+  .card h2 { font-size: 15px; margin: 0; padding: 12px 18px; border-bottom: 1px solid #eee; color: var(--p); }
+  .row { display: grid; grid-template-columns: 220px 1fr; gap: 12px; padding: 12px 18px; border-bottom: 1px solid #f2f2f2; align-items: start; }
+  .row:last-child { border-bottom: 0; }
+  .label b { display: block; font-weight: 500; }
+  .label small { color: #777; display: block; line-height: 1.4; margin-top: 2px; }
+  .ctl { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .ctl input[type=text], .ctl input[type=password], .ctl input[type=number], .ctl select, .ctl textarea {
+    width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 5px; font: inherit; background: #fff; }
+  .ctl textarea { min-height: 80px; resize: vertical; }
+  .ctl input:focus, .ctl select:focus, .ctl textarea:focus { outline: none; border-color: var(--p); }
+  .meta { font-size: 12px; color: #888; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .src { padding: 0 6px; border-radius: 3px; background: #eee; }
+  .src.saved { background: #e7f0ff; color: #1d58a7; } .src.env { background: #f3ecff; color: #6b3fa0; }
+  .meta button, .presets button { background: none; border: 0; color: var(--l); cursor: pointer; padding: 0; font: inherit; font-size: 12px; text-decoration: underline; }
+  .presets { display: flex; gap: 10px; font-size: 12px; color: #888; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid #ddd; padding: 10px 16px; display: flex; justify-content: center; gap: 12px; align-items: center; }
+  .btn { background: var(--p); color: #fff; border: 0; border-radius: 6px; padding: 8px 18px; cursor: pointer; font: inherit; }
+  .btn.ghost { background: #fff; color: var(--p); border: 1px solid var(--p); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  #msg { min-width: 200px; } .ok { color: #1a7f37; } .bad { color: #b00020; }
+  .stats { display: flex; gap: 24px; padding: 14px 18px; flex-wrap: wrap; }
+  .stats div b { display: block; font-size: 20px; color: var(--p); }
+  .stats div span { color: #777; font-size: 12px; }
+  #test-out { font-size: 13px; }
+  .denied { text-align: center; padding: 80px 20px; color: #666; }
+  @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header><h1 id="h-title">wikijs-ask</h1><a href="/" id="h-back">←</a></header>
+<main id="main"><div class="denied" id="loading">…</div></main>
+<div class="bar" id="bar" hidden>
+  <span id="msg"></span>
+  <button class="btn ghost" id="btn-test"></button>
+  <button class="btn" id="btn-save"></button>
+</div>
+<script type="module" src="/_ask/settings.js"></script>
+</body>
+</html>

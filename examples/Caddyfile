@@ -1,0 +1,12 @@
+wiki.example.org {
+	# no compression on /_ask/*: it would buffer the streamed answers
+	@compress not path /_ask/*
+	encode @compress zstd gzip
+
+	handle /_ask/* {
+		reverse_proxy ask:8080 {
+			flush_interval -1
+		}
+	}
+	reverse_proxy wiki:3000
+}
