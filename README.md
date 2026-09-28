@@ -111,6 +111,10 @@ The panel reads CSS variables with built-in fallbacks. Define any of them on `:r
 - Anthropic-only parameters (server-side refusal fallback, adaptive thinking, eager tool input streaming) are
   sent only when the base URL is the Anthropic API.
 
+## AI-assisted development
+
+This project is vibe-coded: the code and documentation were written with an AI coding assistant, directed by the author, and exercised end to end on a live Wiki.js deployment. Review it as you would any third-party code before relying on it.
+
 ## License
 
 MIT
