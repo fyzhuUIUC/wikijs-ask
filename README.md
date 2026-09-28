@@ -8,7 +8,7 @@ on the web. Chats are saved per user and can be exported as Markdown.
 - Permissions come from Wiki.js itself: every lookup runs with the asking user's own login, so nobody gets answers from pages they cannot open
 - Optional web tools: `web_search` (Exa) and `web_fetch` (via Exa, or direct with private-address blocking)
 - Saved conversations per user (Postgres), history list, Markdown export
-- Optional guest questions: visitors who are not logged in can ask from the pages the Wiki.js Guests group can read; nothing is saved for them to reopen, but every guest question is logged server-side (IP, user agent, tool calls, answer) with per-IP and global daily limits
+- Optional guest questions: visitors who are not logged in can ask from the pages the Wiki.js Guests group can read; nothing is saved for them to reopen (they can export the open chat as Markdown), but every guest question is logged server-side (IP, user agent, tool calls, answer) with per-IP and global daily limits
 - Markdown, LaTeX (KaTeX) and code highlighting in answers; streaming output
 - Resizable / maximizable panel, English and Chinese UI
 - Settings page for admins: API endpoint, key, model, web tools, limits, with a connection test and usage totals
@@ -97,7 +97,8 @@ Off by default. When on (settings page → Guests):
 
 - A visitor without a Wiki.js login can ask. The service calls Wiki.js without a jwt, so the model sees exactly
   what the Guests group can read. Web tools are off for guests unless `guest_web` is on.
-- Nothing is saved for the guest to reopen: no history list, no export, nothing in browser storage. Follow-up
+- Nothing is saved for the guest to reopen: no history list, nothing in browser storage. Markdown export works and
+  is built in the browser from the chat on screen, in the same layout as the server export. Follow-up
   questions work while the panel stays open (the conversation id lives in page memory and is bound to the IP that
   started it; the server reads the earlier turns from its own log, never from the client).
 - Every guest question that reaches the model is written to the `guest_log` table: time, IP, user agent, page,

@@ -1,6 +1,7 @@
 // wikijs-ask floating panel. Load on every wiki page:  <script defer src="/_ask/widget.js"></script>
 // Conversations live on the server; the browser remembers only which one is open and the panel size.
-// Guests (not logged in, when the server allows them) get no history: follow-ups work until the page is left.
+// Guests (not logged in, when the server allows them) get no history: follow-ups work until the page is left,
+// and export is built in the browser from the messages on screen.
 (() => {
   if (window.__wikiAsk || location.pathname.startsWith('/login') || location.pathname.startsWith('/_ask/')) return;
   window.__wikiAsk = true;
@@ -12,7 +13,7 @@
     close: '关闭', settings: '设置', resize: '拖动调整大小', send: '发送',
     placeholder: '输入问题(Enter 发送,Shift+Enter 换行)',
     hint: '回答依据你有权限看的 wiki 页面,并附上出处。<br>对话会保存,点历史图标可以找回。',
-    guestHint: '你还没登录,回答只依据公开页面。<br>游客不保存对话,离开或刷新页面后就没了;提问会被记录用于防滥用。',
+    guestHint: '你还没登录,回答只依据公开页面。<br>游客不保存对话,离开或刷新页面后就没了,需要留底请先导出 Markdown;提问会被记录用于防滥用。',
     empty: '还没有对话', loading: '加载中…', rounds: '轮', del: q => `删除「${q}」?`, nothing: '当前对话还没有内容',
     sources: '出处', connecting: '连接中…', thinking: '思考中…', reading: '查阅中…', queued: '排队中…',
     tool: { search_pages: q => `搜索 wiki「${q.query}」`, read_page: q => `阅读 /${q.locale}/${q.path}`, web_search: q => `搜索网络「${q.query}」`, web_fetch: q => `打开 ${q.url}` },
@@ -26,7 +27,7 @@
     close: 'Close', settings: 'Settings', resize: 'Drag to resize', send: 'Send',
     placeholder: 'Ask a question (Enter to send, Shift+Enter for a new line)',
     hint: 'Answers come from wiki pages you can read, with sources.<br>Chats are saved; open them again from History.',
-    guestHint: 'You are not logged in, so answers use public pages only.<br>Guest chats are not saved and end when you leave or reload the page; questions are logged to prevent abuse.',
+    guestHint: 'You are not logged in, so answers use public pages only.<br>Guest chats are not saved and end when you leave or reload the page, so export Markdown to keep one; questions are logged to prevent abuse.',
     empty: 'No chats yet', loading: 'Loading…', rounds: 'turns', del: q => `Delete "${q}"?`, nothing: 'This chat is empty',
     sources: 'Sources', connecting: 'Connecting…', thinking: 'Thinking…', reading: 'Reading…', queued: 'Queued…',
     tool: { search_pages: q => `Searching the wiki: ${q.query}`, read_page: q => `Reading /${q.locale}/${q.path}`, web_search: q => `Searching the web: ${q.query}`, web_fetch: q => `Opening ${q.url}` },
@@ -45,6 +46,7 @@
   let messages = [];
   let busy = false;
   let guest = false;
+  let guestStarted = null;            // when the current guest chat began, for its export
   const remember = id => { convId = id; if (!guest) store.set('wiki-ask-conv', id); };
 
   // ---------- markdown + math + code ----------
@@ -255,15 +257,37 @@
     }
   }
 
+  // same layout as the server's export (db.toMarkdown)
+  function guestMarkdown() {
+    const fmt = d => d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    const title = messages[0].content.replace(/\s+/g, ' ').slice(0, 60);
+    const out = [`# ${title}`, '', `${location.origin} · ${fmt(guestStarted)} – ${fmt(new Date())}`, ''];
+    for (const m of messages) {
+      if (m.role === 'user') { out.push('## Q', '', m.content, ''); continue; }
+      out.push('## A', '', m.content.replace(/\]\(\//g, `](${location.origin}/`), '');
+      if (m.sources?.length) out.push('Sources:', ...m.sources.map(x => `- [${x.title}](${x.url || `${location.origin}/${x.locale}/${x.path}`})`), '');
+    }
+    return out.join('\n');
+  }
+
+  function download(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement('a'), { href: url, download: name });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   async function exportMd() {
+    if (guest) {
+      if (!messages.length) { alert(T.nothing); return; }
+      download(new Blob([guestMarkdown()], { type: 'text/markdown;charset=utf-8' }), `wiki-ask-${guestStarted.toISOString().slice(0, 10)}.md`);
+      return;
+    }
     if (!convId) { alert(T.nothing); return; }
     try {
       const r = await api(`conversations/${convId}/export`);
       const name = (r.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'wiki-ask.md';
-      const url = URL.createObjectURL(await r.blob());
-      const a = Object.assign(document.createElement('a'), { href: url, download: name });
-      document.body.append(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      download(await r.blob(), name);
     } catch (e) { alert(e.message); }
   }
 
@@ -273,7 +297,7 @@
       if (u.admin) $('[data-act="settings"]').hidden = false;
       if (u.guest && u.guest_enabled) {
         guest = true; convId = null;
-        for (const act of ['history', 'export']) $(`[data-act="${act}"]`).hidden = true;
+        $('[data-act="history"]').hidden = true;
       }
     }).catch(() => { /* chat will show the error */ });
     return me;
@@ -307,6 +331,7 @@
     input.value = '';
     if (!messages.length) log.innerHTML = '';
     bubble({ role: 'user', content: q });
+    if (guest && !messages.length) guestStarted = new Date();
 
     const box = bubble({ role: 'assistant', content: '' });
     const body = box.querySelector('.wa-body');
