@@ -20,7 +20,7 @@ extensions, so nothing in Wiki.js is modified and it can be upgraded independent
 
 ```
 browser ── /_ask/* ──> reverse proxy ──> wikijs-ask ──> Wiki.js GraphQL + page HTML (with the user's jwt)
-        └─ everything else ─────────────> Wiki.js      ├─> model endpoint (Anthropic Messages API)
+        └─ everything else ─────────────> Wiki.js      ├─> model endpoint (Anthropic Messages or OpenAI chat/completions)
                                                         ├─> Exa (optional)
                                                         └─> Postgres database "ask"
 ```

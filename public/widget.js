@@ -314,11 +314,12 @@
     status.className = 'wa-status';
     status.textContent = T.connecting;
     box.prepend(status);
-    let answer = '', sources = [], pending = false;
+    let answer = '', sources = [], pending = false, finished = false;
     const paint = () => {
       if (pending) return;
       pending = true;
-      requestAnimationFrame(async () => { pending = false; await render(body, answer); log.scrollTop = log.scrollHeight; });
+      // a frame that fires after the final render would wipe the sources line
+      requestAnimationFrame(async () => { pending = false; if (finished) return; await render(body, answer); log.scrollTop = log.scrollHeight; });
     };
 
     try {
@@ -347,9 +348,11 @@
       }
       if (!answer) throw new Error(T.err.no_answer);
       messages.push({ role: 'user', content: q }, { role: 'assistant', content: answer, sources });
+      finished = true;
       await render(body, answer);
       body.insertAdjacentHTML('beforeend', sourcesHtml(sources));
     } catch (err) {
+      finished = true;
       status.remove();
       body.innerHTML = `<span class="wa-err">${esc(err.message)}</span>`;
       input.value = q;                        // unanswered questions are not saved; let the user retry
