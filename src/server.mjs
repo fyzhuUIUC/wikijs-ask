@@ -12,14 +12,21 @@
 //   PUT    /_ask/admin/settings                   (admin) save a patch
 //   POST   /_ask/admin/test                       (admin) test model settings
 //   GET    /_ask/admin/stats                      (admin) usage totals
+//   GET    /_ask/admin/guest-log?before=<id>      (admin) guest questions, newest first
 //
-// Only logged-in Wiki.js users (jwt cookie). API requests must come from the
-// wiki page itself: Origin (when sent) must equal ASK_ORIGIN, the custom
-// X-Wiki-Ask header forces a CORS preflight that nothing answers, and
-// Sec-Fetch-Site must be same-origin. History is read from the database,
-// never taken from the client.
+// Logged-in Wiki.js users (jwt cookie) get everything above. Guests, when
+// guest_enabled is on, get only /_ask/me and /_ask/chat: they read what the
+// Wiki.js Guests group can read, nothing is kept for them to reopen, and every
+// question is written to guest_log (ip, user agent, tools, answer) and counted
+// against per-ip and global daily limits.
+//
+// API requests must come from the wiki page itself: Origin (when sent) must
+// equal ASK_ORIGIN, the custom X-Wiki-Ask header forces a CORS preflight that
+// nothing answers, and Sec-Fetch-Site must be same-origin. History is read
+// from the database, never taken from the client.
 
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -76,6 +83,12 @@ function sameOrigin(req) {
   return !site || site === 'same-origin';
 }
 
+// The nearest proxy appends the address it saw (Caddy replaces the header), so the last entry is the one to trust.
+function clientIp(req) {
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',').map(x => x.trim()).filter(Boolean);
+  return xff.length ? xff[xff.length - 1] : String(req.socket.remoteAddress || '');
+}
+
 async function readBody(req) {
   let body = '';
   for await (const chunk of req) {
@@ -95,6 +108,15 @@ function errorCode(err, aborted) {
 }
 
 // ---------- chat ----------
+function openStream(res) {
+  res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' });
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), TIMEOUT_MS);
+  res.on('close', () => ac.abort());
+  const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  return { ac, send, done: () => { clearTimeout(timer); res.end(); } };
+}
+
 async function chat(req, res, user, jwt) {
   const s = config.get();
   let body;
@@ -113,26 +135,22 @@ async function chat(req, res, user, jwt) {
 
   const history = s.history_turns ? (conv?.messages || []).slice(-2 * s.history_turns).map(m => ({ role: m.role, content: m.content })) : [];
   const messages = [...history, { role: 'user', content: question }];
+  const convId = conv?.id || randomUUID();
 
-  res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', 'x-accel-buffering': 'no' });
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), TIMEOUT_MS);
-  res.on('close', () => ac.abort());
-  const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-
+  const { ac, send, done } = openStream(res);
   const started = Date.now();
-  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const ip = clientIp(req);
   if (running >= s.max_concurrent) send('status', { code: 'queued' });
   await acquire();
   let answer = '', sources = [];
   try {
-    for await (const ev of ask({ jwt, messages, signal: ac.signal })) {
+    for await (const ev of ask({ jwt, messages, signal: ac.signal, session: convId })) {
       const { type, ...rest } = ev;
       if (type === 'text') answer += rest.delta;
       if (type === 'sources') sources = rest.pages;
       if (type === 'done') {
         if (!answer.trim()) throw new AskError('no_answer');
-        if (!conv) conv = await db.createConversation(user, question.replace(/\s+/g, ' ').slice(0, 60));
+        if (!conv) conv = await db.createConversation(user, question.replace(/\s+/g, ' ').slice(0, 60), convId);
         await db.appendExchange(conv.id, question, answer, sources, rest.usage);
         send('saved', { conversation_id: conv.id, title: conv.title });
         console.log(JSON.stringify({ ts: new Date().toISOString(), user: user.email, ip, conv: conv.id, ms: Date.now() - started, ...rest.usage }));
@@ -144,8 +162,73 @@ async function chat(req, res, user, jwt) {
     send('error', { code: errorCode(err, ac.signal.aborted) });   // details stay in the log
   } finally {
     release();
-    clearTimeout(timer);
-    res.end();
+    done();
+  }
+}
+
+// Guests: follow-ups only within one open panel (the id lives in page memory), bound to the ip
+// that started it; every exchange that reaches the model is logged, answered or not.
+async function guestChat(req, res, jwt) {
+  const s = config.get();
+  const ip = clientIp(req);
+  let body;
+  try { body = await readBody(req); } catch { return json(res, 400, { error: 'invalid_json' }); }
+  const question = typeof body?.question === 'string' ? body.question.trim() : '';
+  if (!question) return json(res, 400, { error: 'question_required' });
+  if (question.length > s.guest_max_question_chars) return json(res, 413, { error: 'too_long' });
+  if (!s.enabled) return json(res, 503, { error: 'disabled' });
+
+  const counts = await db.guestCounts(ip);
+  if (counts.ip >= s.guest_per_ip_day) { console.log(JSON.stringify({ ts: new Date().toISOString(), guest: true, ip, refused: 'guest_limit' })); return json(res, 429, { error: 'guest_limit' }); }
+  if (counts.total >= s.guest_total_day) { console.log(JSON.stringify({ ts: new Date().toISOString(), guest: true, ip, refused: 'guest_quota' })); return json(res, 503, { error: 'guest_quota' }); }
+  if (waiting.length >= s.max_queue) return json(res, 503, { error: 'busy' });
+
+  let convId = null, history = [];
+  if (body.conversation_id) {
+    const h = await db.guestHistory(String(body.conversation_id), ip, s.guest_history_turns);
+    if (h) { convId = String(body.conversation_id); history = h; }
+  }
+  convId ||= randomUUID();
+  const messages = [...history, { role: 'user', content: question }];
+
+  const { ac, send, done } = openStream(res);
+  const started = Date.now();
+  const row = {
+    conversation_id: convId, ip, question,
+    user_agent: String(req.headers['user-agent'] || '').slice(0, 400),
+    page: (() => { try { return new URL(req.headers.referer).pathname.slice(0, 400); } catch { return null; } })(),
+    tools: [], sources: [], answer: null, usage: null, error: null,
+  };
+  if (running >= s.max_concurrent) send('status', { code: 'queued' });
+  await acquire();
+  let answer = '';
+  try {
+    for await (const ev of ask({ jwt, messages, signal: ac.signal, guest: true, session: convId })) {
+      const { type, ...rest } = ev;
+      if (type === 'text') answer += rest.delta;
+      if (type === 'tool') row.tools.push({ name: rest.name, input: rest.input });
+      if (type === 'tool_result') Object.assign(row.tools.find(t => t.name === rest.name && t.ok === undefined) || {}, { ok: rest.ok, chars: rest.chars });
+      if (type === 'sources') row.sources = rest.pages;
+      if (type === 'done') {
+        if (!answer.trim()) throw new AskError('no_answer');
+        row.answer = answer;
+        row.usage = rest.usage;
+        send('saved', { conversation_id: convId, guest: true });
+      }
+      send(type, rest);
+    }
+  } catch (err) {
+    const code = errorCode(err, ac.signal.aborted);
+    row.error = `${code}: ${String(err?.message || err).slice(0, 500)}`;
+    console.error('guest ask failed:', ip, err);
+    send('error', { code });
+  } finally {
+    release();
+    row.ms = Date.now() - started;
+    if (!row.answer && answer) row.error = `${row.error}\n--- partial answer ---\n${answer.slice(0, 20000)}`;
+    await db.guestLogAppend(row).catch(e => console.error('guest log failed:', e));
+    console.log(JSON.stringify({ ts: new Date().toISOString(), guest: true, ip, conv: convId, ms: row.ms, error: row.error ? row.error.split(':')[0] : undefined, ...row.usage }));
+    done();
   }
 }
 
@@ -168,7 +251,13 @@ async function admin(req, res, user, route) {
       return json(res, 200, { ok: false, error: e.message });
     }
   }
-  if (route === 'stats' && req.method === 'GET') return json(res, 200, { ...(await db.stats()), running, queued: waiting.length });
+  if (route === 'stats' && req.method === 'GET') {
+    return json(res, 200, { ...(await db.stats()), ...(await db.guestStats()), running, queued: waiting.length });
+  }
+  if (route === 'guest-log' && req.method === 'GET') {
+    const before = Number.parseInt(new URL(req.url, ORIGIN).searchParams.get('before'), 10);
+    return json(res, 200, { rows: await db.guestLog(100, Number.isFinite(before) ? before : null) });
+  }
   return json(res, 404, { error: 'not_found' });
 }
 
@@ -185,16 +274,24 @@ async function route(req, res) {
 
   const jwt = cookie(req, 'jwt');
   const user = await whoami(jwt);
-  if (!user) return json(res, 401, { error: 'login_required' });
+  if (!user) {
+    const s = config.get();
+    if (url.pathname === '/_ask/me' && req.method === 'GET') {
+      return json(res, 200, { guest: true, guest_enabled: s.guest_enabled, enabled: s.enabled });
+    }
+    // guests never send the (expired or foreign) jwt on to Wiki.js
+    if (url.pathname === '/_ask/chat' && req.method === 'POST' && s.guest_enabled) return guestChat(req, res, '');
+    return json(res, 401, { error: 'login_required' });
+  }
 
   if (url.pathname === '/_ask/me' && req.method === 'GET') {
-    return json(res, 200, { email: user.email, name: user.name, admin: user.admin, enabled: config.get().enabled });
+    return json(res, 200, { guest: false, email: user.email, name: user.name, admin: user.admin, enabled: config.get().enabled });
   }
   if (url.pathname === '/_ask/chat' && req.method === 'POST') return chat(req, res, user, jwt);
   if (url.pathname === '/_ask/conversations' && req.method === 'GET') {
     return json(res, 200, { conversations: await db.listConversations(user.id) });
   }
-  const a = url.pathname.match(/^\/_ask\/admin\/(settings|test|stats)$/);
+  const a = url.pathname.match(/^\/_ask\/admin\/(settings|test|stats|guest-log)$/);
   if (a) return admin(req, res, user, a[1]);
   const m = url.pathname.match(/^\/_ask\/conversations\/([0-9a-f-]{36})(\/export)?$/i);
   if (m) {
@@ -218,6 +315,10 @@ async function route(req, res) {
 
 await db.init();
 await config.load();
+const prune = () => db.guestPrune(config.get().guest_log_days)
+  .then(n => n && console.log(`guest_log: pruned ${n} rows`)).catch(e => console.error('guest prune failed:', e));
+prune();
+setInterval(prune, 24 * 3600_000).unref();
 http.createServer((req, res) => {
   route(req, res).catch(err => {
     console.error('request failed:', err);

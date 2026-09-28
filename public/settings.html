@@ -38,6 +38,15 @@
   .stats div span { color: #777; font-size: 12px; }
   #test-out { font-size: 13px; }
   .denied { text-align: center; padding: 80px 20px; color: #666; }
+  .glog { overflow-x: auto; padding: 0 0 8px; }
+  .glog table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .glog th, .glog td { text-align: left; vertical-align: top; padding: 6px 10px; border-bottom: 1px solid #f2f2f2; }
+  .glog th { color: #777; font-weight: 500; }
+  .glog td small { color: #999; }
+  .glog tr.err td { background: #fff5f5; }
+  .glog .clip { max-height: 7.5em; overflow: auto; white-space: pre-wrap; word-break: break-word; min-width: 140px; }
+  .glog .empty { color: #888; padding: 4px 18px; }
+  .glog .more { margin: 8px 18px; background: none; border: 0; color: var(--l); cursor: pointer; text-decoration: underline; font: inherit; }
   @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
 </style>
 </head>

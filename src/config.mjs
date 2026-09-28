@@ -1,12 +1,19 @@
 // Settings: built-in defaults < environment < values saved from the settings page (table "settings").
 // Values saved on the settings page take effect immediately; nothing needs a restart.
 
+import { readFileSync } from 'node:fs';
 import * as db from './db.mjs';
 
+export const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+export const USER_AGENT = `wikijs-ask/${VERSION}`;
+
 export const FIELDS = {
+  api_format:         { type: 'enum', env: 'ASK_API_FORMAT', default: 'anthropic', options: ['anthropic', 'openai'] },
   base_url:           { type: 'string', env: 'ASK_BASE_URL', default: '' },
   api_key:            { type: 'secret', env: ['ASK_API_KEY', 'ANTHROPIC_API_KEY'], default: '' },
   model:              { type: 'string', env: 'ASK_MODEL', default: '' },
+  // request header carrying a stable id per conversation (OpenCode Go wants x-opencode-session)
+  session_header:     { type: 'string', env: 'ASK_SESSION_HEADER', default: '' },
   effort:             { type: 'enum', env: 'ASK_EFFORT', default: '', options: ['', 'low', 'medium', 'high', 'xhigh', 'max'] },
   max_turns:          { type: 'int', env: 'ASK_MAX_TURNS', default: 8, min: 2, max: 30 },
   history_turns:      { type: 'int', env: 'ASK_HISTORY_TURNS', default: 10, min: 0, max: 100 },
@@ -17,6 +24,15 @@ export const FIELDS = {
   wiki_name:          { type: 'string', env: 'ASK_WIKI_NAME', default: 'this wiki' },
   extra_instructions: { type: 'text', env: 'ASK_EXTRA_INSTRUCTIONS', default: '' },
   enabled:            { type: 'bool', env: 'ASK_ENABLED', default: true },
+  // guests (no Wiki.js login): read what the Guests group can read, nothing kept for them to reopen;
+  // every guest exchange is logged server-side (table guest_log) and counted for the limits below
+  guest_enabled:      { type: 'bool', env: 'ASK_GUEST_ENABLED', default: false },
+  guest_web:          { type: 'bool', env: 'ASK_GUEST_WEB', default: false },
+  guest_per_ip_day:   { type: 'int', env: 'ASK_GUEST_PER_IP_DAY', default: 20, min: 1, max: 10000 },
+  guest_total_day:    { type: 'int', env: 'ASK_GUEST_TOTAL_DAY', default: 300, min: 1, max: 1000000 },
+  guest_history_turns: { type: 'int', env: 'ASK_GUEST_HISTORY_TURNS', default: 3, min: 0, max: 20 },
+  guest_max_question_chars: { type: 'int', env: 'ASK_GUEST_MAX_QUESTION_CHARS', default: 1000, min: 100, max: 100000 },
+  guest_log_days:     { type: 'int', env: 'ASK_GUEST_LOG_DAYS', default: 90, min: 1, max: 3650 },
   // web tools; web_search needs an Exa key, web_fetch "direct" fetches pages itself
   web_search:         { type: 'bool', env: 'ASK_WEB_SEARCH', default: true },
   exa_api_key:        { type: 'secret', env: 'EXA_API_KEY', default: '' },
@@ -79,6 +95,7 @@ export function get() { return current.values; }
 export function onChange(fn) { listeners.push(fn); }
 
 export function isAnthropic(values = current.values) {
+  if (values.api_format === 'openai') return false;
   return !values.base_url || /(^|\.)anthropic\.com/.test(new URL(values.base_url).hostname);
 }
 
@@ -111,6 +128,7 @@ export function validate(patch) {
     if (f.type === 'secret' && raw === '') continue;
     const v = parse(f, raw);
     if (v === undefined) throw new Error(`invalid value for ${key}`);
+    if (key === 'session_header' && v && !/^[A-Za-z0-9-]+$/.test(v)) throw new Error('session_header must be a header name');
     if (key === 'base_url' && v) {
       let u;
       try { u = new URL(v); } catch { throw new Error('base_url must be a URL'); }

@@ -5,19 +5,23 @@ const L = zh ? {
   testing: '测试中…', denied: '只有 wiki 管理员能打开这一页。', login: '请先登录 wiki。',
   src: { default: '默认', env: '环境变量', saved: '已保存' }, reset: '恢复默认', keep: '留空则不修改', set: '已设置', unset: '未设置',
   clear: '清除', stats: '用量', conversations: '对话', messages: '消息', users: '用户', answers7d: '近 7 天回答',
-  tokens: 'token(输入 / 输出)', running: '进行中 / 排队',
-  sections: { model: '模型', web: '联网', behavior: '回答行为', limits: '并发与限制', switch: '开关' },
+  tokens: 'token(输入 / 输出)', running: '进行中 / 排队', guest1d: '游客提问 24h', guest7d: '游客提问 7 天', guestIps: '游客 IP 7 天',
+  guestLog: '游客提问记录', more: '更多', none: '还没有记录', time: '时间', question: '问题', answer: '回答 / 错误', tools: '工具',
+  sections: { model: '模型', web: '联网', behavior: '回答行为', limits: '并发与限制', guest: '游客', switch: '开关' },
 } : {
   title: 'Q&A settings', back: '← back to wiki', save: 'Save', test: 'Test connection', saving: 'Saving…', saved: 'Saved, in effect now',
   testing: 'Testing…', denied: 'Only wiki administrators can open this page.', login: 'Please log in to the wiki first.',
   src: { default: 'default', env: 'environment', saved: 'saved' }, reset: 'reset', keep: 'leave empty to keep', set: 'set', unset: 'not set',
   clear: 'clear', stats: 'Usage', conversations: 'chats', messages: 'messages', users: 'users', answers7d: 'answers, last 7 days',
-  tokens: 'tokens (in / out)', running: 'running / queued',
-  sections: { model: 'Model', web: 'Web tools', behavior: 'Answering', limits: 'Concurrency and limits', switch: 'On / off' },
+  tokens: 'tokens (in / out)', running: 'running / queued', guest1d: 'guest questions, 24h', guest7d: 'guest questions, 7 days', guestIps: 'guest IPs, 7 days',
+  guestLog: 'Guest questions', more: 'More', none: 'Nothing yet', time: 'Time', question: 'Question', answer: 'Answer / error', tools: 'Tools',
+  sections: { model: 'Model', web: 'Web tools', behavior: 'Answering', limits: 'Concurrency and limits', guest: 'Guests', switch: 'On / off' },
 };
 
 const F = zh ? {
-  base_url: ['API 地址', 'Anthropic Messages 协议的端点。留空 = Anthropic 官方。'],
+  api_format: ['API 协议', 'anthropic = Messages 协议;openai = chat/completions 协议(如 OpenCode Go 上的 GLM)。'],
+  base_url: ['API 地址', '留空 = Anthropic 官方。openai 协议填到 /v1 即可,会自动补 /chat/completions。'],
+  session_header: ['会话头', '每个对话带一个固定 id 的请求头名,例如 OpenCode Go 要求的 x-opencode-session;留空 = 不发。'],
   api_key: ['API key', '保存在数据库里,只显示末四位。'],
   model: ['模型', '留空时,Anthropic 官方默认 claude-opus-5;其它端点必须填写。'],
   effort: ['思考强度', '只有 Anthropic 官方模型支持;留空 = 模型默认。'],
@@ -35,8 +39,17 @@ const F = zh ? {
   max_concurrent: ['全局并发', '同时进行的问答数,其余排队。'],
   max_queue: ['最大排队数', '排满后新问题直接提示稍后再试。'],
   enabled: ['启用问答', '关闭后挂件仍在,但不回答。'],
+  guest_enabled: ['允许游客提问', '未登录也能问,只依据 Guests 组能看的页面。游客没有历史对话;每次提问连同 IP、UA、工具调用和回答都记在后台。'],
+  guest_web: ['游客可用联网工具', '默认关:游客只能查 wiki。'],
+  guest_per_ip_day: ['每 IP 每天', '同一 IP 24 小时内最多提问次数。'],
+  guest_total_day: ['游客每天总量', '所有游客 24 小时内合计上限,控制花费。'],
+  guest_history_turns: ['游客追问轮数', '同一个打开的面板里带入最近几轮;刷新页面即清空。'],
+  guest_max_question_chars: ['游客问题字数上限', ''],
+  guest_log_days: ['游客记录保留天数', '超过的自动删除。'],
 } : {
-  base_url: ['API base URL', 'An Anthropic Messages endpoint. Empty = Anthropic API.'],
+  api_format: ['API format', 'anthropic = Messages API; openai = chat/completions (e.g. GLM on OpenCode Go).'],
+  base_url: ['API base URL', 'Empty = Anthropic API. For openai, the /v1 base is enough; /chat/completions is added.'],
+  session_header: ['Session header', 'Header carrying a stable id per chat, e.g. x-opencode-session for OpenCode Go; empty = none.'],
   api_key: ['API key', 'Stored in the database; only the last four characters are shown.'],
   model: ['Model', 'Empty = claude-opus-5 on the Anthropic API; required for other endpoints.'],
   effort: ['Effort', 'Anthropic models only; empty = model default.'],
@@ -54,15 +67,27 @@ const F = zh ? {
   max_concurrent: ['Concurrency', 'Answers running at once; the rest wait.'],
   max_queue: ['Max queue', 'When full, new questions get "try again later".'],
   enabled: ['Enabled', 'When off the panel stays but does not answer.'],
+  guest_enabled: ['Allow guests', 'Visitors who are not logged in can ask, from pages the Guests group can read. No chat history for them; every question is logged here with IP, user agent, tool calls and answer.'],
+  guest_web: ['Web tools for guests', 'Off by default: guests only get the wiki.'],
+  guest_per_ip_day: ['Per IP per day', 'Questions one IP may ask in 24 hours.'],
+  guest_total_day: ['Guest total per day', 'All guests together in 24 hours, to bound cost.'],
+  guest_history_turns: ['Guest follow-up turns', 'Previous turns in the same open panel; a reload starts over.'],
+  guest_max_question_chars: ['Guest max question length', ''],
+  guest_log_days: ['Keep guest log (days)', 'Older rows are deleted.'],
 };
 const SECTIONS = {
-  model: ['base_url', 'api_key', 'model', 'effort'],
+  model: ['api_format', 'base_url', 'api_key', 'model', 'session_header', 'effort'],
   web: ['web_search', 'exa_api_key', 'web_search_results', 'web_fetch', 'web_fetch_via'],
   behavior: ['wiki_name', 'extra_instructions', 'max_turns', 'history_turns', 'page_char_cap'],
   limits: ['max_concurrent', 'max_queue', 'max_question_chars'],
+  guest: ['guest_enabled', 'guest_web', 'guest_per_ip_day', 'guest_total_day', 'guest_history_turns', 'guest_max_question_chars', 'guest_log_days'],
   switch: ['enabled'],
 };
-const PRESETS = [['Anthropic', ''], ['z.ai (智谱)', 'https://api.z.ai/api/anthropic']];
+const PRESETS = [
+  ['Anthropic', { api_format: 'anthropic', base_url: '', session_header: '' }],
+  ['z.ai (智谱)', { api_format: 'anthropic', base_url: 'https://api.z.ai/api/anthropic', session_header: '' }],
+  ['OpenCode Go', { api_format: 'openai', base_url: 'https://opencode.ai/zen/go/v1', session_header: 'x-opencode-session' }],
+];
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -107,7 +132,7 @@ function render() {
     card.innerHTML = `<h2>${L.sections[sec]}</h2>` + keys.map(key => {
       const s = settings[key];
       const [label, help] = F[key];
-      const extra = key === 'base_url' ? `<div class="presets">${PRESETS.map(([n, u]) => `<button type="button" data-preset="${esc(u)}">${esc(n)}</button>`).join('')}</div>` : '';
+      const extra = key === 'base_url' ? `<div class="presets">${PRESETS.map(([n], i) => `<button type="button" data-preset="${i}">${esc(n)}</button>`).join('')}</div>` : '';
       const clear = s.type === 'secret' && s.source === 'saved' ? `<button type="button" data-clear="${key}">${L.clear}</button>` : '';
       return `<div class="row"><div class="label"><b>${label}</b><small>${help}</small></div>
         <div class="ctl">${control(key, s)}${extra}
@@ -126,11 +151,41 @@ function render() {
     });
   });
   main.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => {
-    $('#f-base_url').value = b.dataset.preset; patch.base_url = b.dataset.preset; dirty();
+    for (const [k, v] of Object.entries(PRESETS[b.dataset.preset][1])) { $(`#f-${k}`).value = v; patch[k] = v; }
+    dirty();
   });
   main.querySelectorAll('[data-reset]').forEach(b => b.onclick = () => { patch[b.dataset.reset] = null; save(); });
   main.querySelectorAll('[data-clear]').forEach(b => b.onclick = () => { patch[b.dataset.clear] = null; save(); });
+  const log = document.createElement('div');
+  log.className = 'card';
+  log.innerHTML = `<h2>${L.guestLog}</h2><div class="glog" id="glog"></div>`;
+  main.append(log);
   loadStats();
+  loadGuestLog();
+}
+
+let guestBefore = null;
+async function loadGuestLog(more) {
+  const box = $('#glog');
+  try {
+    const { rows } = await api(`admin/guest-log${more && guestBefore ? `?before=${guestBefore}` : ''}`);
+    if (!more) box.innerHTML = rows.length ? `<table><thead><tr><th>${L.time}</th><th>IP</th><th>${L.question}</th><th>${L.tools}</th><th>${L.answer}</th></tr></thead><tbody></tbody></table>` : `<p class="empty">${L.none}</p>`;
+    const tb = box.querySelector('tbody');
+    for (const r of rows) {
+      const tools = r.tools.map(t => `${t.name}(${Object.values(t.input || {}).join(', ')})${t.ok === false ? ' ✗' : ''}`).join('\n');
+      tb?.insertAdjacentHTML('beforeend', `<tr${r.error ? ' class="err"' : ''}>
+        <td>${esc(new Date(r.created_at).toLocaleString())}<br><small>${esc(r.page || '')}</small></td>
+        <td title="${esc(r.user_agent)}">${esc(r.ip)}<br><small>${esc(r.conversation_id.slice(0, 8))}</small></td>
+        <td><div class="clip">${esc(r.question)}</div></td><td><div class="clip">${esc(tools)}</div></td>
+        <td><div class="clip">${esc(r.error || r.answer || '')}</div></td></tr>`);
+    }
+    guestBefore = rows.length ? rows[rows.length - 1].id : guestBefore;
+    box.querySelector('.more')?.remove();
+    if (rows.length === 100) {
+      box.insertAdjacentHTML('beforeend', `<button type="button" class="more">${L.more}</button>`);
+      box.querySelector('.more').onclick = () => loadGuestLog(true);
+    }
+  } catch { /* optional */ }
 }
 
 function dirty(keepMsg) {
@@ -145,6 +200,7 @@ async function loadStats() {
       [s.conversations, L.conversations], [s.messages, L.messages], [s.users, L.users], [s.answers_7d, L.answers7d],
       [`${Number(s.input_tokens).toLocaleString()} / ${Number(s.output_tokens).toLocaleString()}`, L.tokens],
       [`${s.running} / ${s.queued}`, L.running],
+      [s.guest_1d, L.guest1d], [s.guest_7d, L.guest7d], [s.guest_ips_7d, L.guestIps],
     ].map(([v, k]) => `<div><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join('');
   } catch { /* stats are optional */ }
 }

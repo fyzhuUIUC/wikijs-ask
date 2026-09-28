@@ -1,5 +1,6 @@
 // wikijs-ask floating panel. Load on every wiki page:  <script defer src="/_ask/widget.js"></script>
 // Conversations live on the server; the browser remembers only which one is open and the panel size.
+// Guests (not logged in, when the server allows them) get no history: follow-ups work until the page is left.
 (() => {
   if (window.__wikiAsk || location.pathname.startsWith('/login') || location.pathname.startsWith('/_ask/')) return;
   window.__wikiAsk = true;
@@ -11,25 +12,29 @@
     close: '关闭', settings: '设置', resize: '拖动调整大小', send: '发送',
     placeholder: '输入问题(Enter 发送,Shift+Enter 换行)',
     hint: '回答依据你有权限看的 wiki 页面,并附上出处。<br>对话会保存,点历史图标可以找回。',
+    guestHint: '你还没登录,回答只依据公开页面。<br>游客不保存对话,离开或刷新页面后就没了;提问会被记录用于防滥用。',
     empty: '还没有对话', loading: '加载中…', rounds: '轮', del: q => `删除「${q}」?`, nothing: '当前对话还没有内容',
     sources: '出处', connecting: '连接中…', thinking: '思考中…', reading: '查阅中…', queued: '排队中…',
     tool: { search_pages: q => `搜索 wiki「${q.query}」`, read_page: q => `阅读 /${q.locale}/${q.path}`, web_search: q => `搜索网络「${q.query}」`, web_fetch: q => `打开 ${q.url}` },
     err: { login_required: '请先登录', too_long: '问题太长了', busy: '排队的人太多,稍后再试', disabled: '问答已关闭',
       not_configured: '问答还没配置好模型', rate_limited: '模型服务繁忙,稍后再试', model_unavailable: '模型服务暂时不可用',
       timeout: '超时或已取消', refusal: '模型拒绝回答这个问题', too_long_answer: '回答超出长度上限', no_answer: '没有得到回答',
-      not_found: '对话不存在', conversation_not_found: '对话不存在', failed: '出错了' },
+      not_found: '对话不存在', conversation_not_found: '对话不存在', failed: '出错了',
+      guest_limit: '游客今天的提问次数用完了,登录后可以继续', guest_quota: '今天游客提问的总量已满,登录后可以继续' },
   } : {
     title: 'Ask this wiki', history: 'History', new: 'New chat', export: 'Export Markdown', max: 'Maximize', restore: 'Restore',
     close: 'Close', settings: 'Settings', resize: 'Drag to resize', send: 'Send',
     placeholder: 'Ask a question (Enter to send, Shift+Enter for a new line)',
     hint: 'Answers come from wiki pages you can read, with sources.<br>Chats are saved; open them again from History.',
+    guestHint: 'You are not logged in, so answers use public pages only.<br>Guest chats are not saved and end when you leave or reload the page; questions are logged to prevent abuse.',
     empty: 'No chats yet', loading: 'Loading…', rounds: 'turns', del: q => `Delete "${q}"?`, nothing: 'This chat is empty',
     sources: 'Sources', connecting: 'Connecting…', thinking: 'Thinking…', reading: 'Reading…', queued: 'Queued…',
     tool: { search_pages: q => `Searching the wiki: ${q.query}`, read_page: q => `Reading /${q.locale}/${q.path}`, web_search: q => `Searching the web: ${q.query}`, web_fetch: q => `Opening ${q.url}` },
     err: { login_required: 'Please log in first', too_long: 'Question is too long', busy: 'Too many people waiting, try again later', disabled: 'Q&A is turned off',
       not_configured: 'No model is configured yet', rate_limited: 'Model service is busy, try again later', model_unavailable: 'Model service is unavailable',
       timeout: 'Timed out or cancelled', refusal: 'The model declined to answer', too_long_answer: 'Answer exceeded the length limit', no_answer: 'No answer',
-      not_found: 'Chat not found', conversation_not_found: 'Chat not found', failed: 'Something went wrong' },
+      not_found: 'Chat not found', conversation_not_found: 'Chat not found', failed: 'Something went wrong',
+      guest_limit: 'Guest question limit for today reached; log in to continue', guest_quota: 'Guest questions are used up for today; log in to continue' },
   };
 
   const store = {
@@ -39,6 +44,8 @@
   let convId = store.get('wiki-ask-conv');
   let messages = [];
   let busy = false;
+  let guest = false;
+  const remember = id => { convId = id; if (!guest) store.set('wiki-ask-conv', id); };
 
   // ---------- markdown + math + code ----------
   for (const href of [`${CDN}/katex@0.18.7/dist/katex.min.css`, `${CDN}/@highlightjs/cdn-assets@11/styles/github.min.css`, '/_ask/widget.css']) {
@@ -197,25 +204,25 @@
   function showChat(title) {
     list.hidden = true; log.hidden = false; form.hidden = false;
     titleEl.textContent = title || T.title;
-    log.innerHTML = messages.length ? '' : `<div class="wa-hint">${T.hint}</div>`;
+    log.innerHTML = messages.length ? '' : `<div class="wa-hint">${guest ? T.guestHint : T.hint}</div>`;
     messages.forEach(bubble);
   }
 
   async function openConv(id) {
     try {
       const conv = await (await api(`conversations/${id}`)).json();
-      convId = conv.id; store.set('wiki-ask-conv', convId);
+      remember(conv.id);
       messages = conv.messages;
       showChat(conv.title);
     } catch (e) {
-      if (e.code === 'not_found') { convId = null; store.set('wiki-ask-conv', null); messages = []; showChat(); }
+      if (e.code === 'not_found') { remember(null); messages = []; showChat(); }
       else { showChat(); log.innerHTML = `<div class="wa-hint wa-err">${esc(e.message)}</div>`; }
     }
   }
 
   function newConv() {
     if (busy) return;
-    convId = null; store.set('wiki-ask-conv', null); messages = [];
+    remember(null); messages = [];
     showChat(); input.focus();
   }
 
@@ -238,7 +245,7 @@
         row.querySelector('button').onclick = async () => {
           if (!confirm(T.del(c.title))) return;
           await api(`conversations/${c.id}`, { method: 'DELETE' });
-          if (c.id === convId) { convId = null; store.set('wiki-ask-conv', null); messages = []; }
+          if (c.id === convId) { remember(null); messages = []; }
           showHistory();
         };
         list.append(row);
@@ -260,16 +267,24 @@
     } catch (e) { alert(e.message); }
   }
 
-  let meChecked = false;
+  let me = null;
   async function checkMe() {
-    if (meChecked) return;
-    meChecked = true;
-    try { if ((await (await api('me')).json()).admin) $('[data-act="settings"]').hidden = false; } catch { /* not logged in */ }
+    me ||= api('me').then(r => r.json()).then(u => {
+      if (u.admin) $('[data-act="settings"]').hidden = false;
+      if (u.guest && u.guest_enabled) {
+        guest = true; convId = null;
+        for (const act of ['history', 'export']) $(`[data-act="${act}"]`).hidden = true;
+      }
+    }).catch(() => { /* chat will show the error */ });
+    return me;
   }
 
-  fab.onclick = () => {
+  fab.onclick = async () => {
     panel.hidden = !panel.hidden;
-    if (!panel.hidden) { checkMe(); convId ? openConv(convId) : showChat(); input.focus(); }
+    if (panel.hidden) return;
+    await checkMe();
+    convId && !guest ? openConv(convId) : showChat();
+    input.focus();
   };
   $('.wa-tools').onclick = e => {
     const act = e.target.closest('[data-act]')?.dataset.act;
@@ -325,7 +340,7 @@
           else if (ev === 'tool') status.textContent = (T.tool[data.name] || (() => data.name))(data.input || {});
           else if (ev === 'text') { answer += data.delta; paint(); }
           else if (ev === 'sources') sources = data.pages;
-          else if (ev === 'saved') { convId = data.conversation_id; store.set('wiki-ask-conv', convId); titleEl.textContent = data.title; }
+          else if (ev === 'saved') { remember(data.conversation_id); if (data.title) titleEl.textContent = data.title; }
           else if (ev === 'error') throw Object.assign(new Error(T.err[data.code] || T.err.failed), { code: data.code });
           else if (ev === 'done') status.remove();
         }
